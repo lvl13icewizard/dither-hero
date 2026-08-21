@@ -1,6 +1,6 @@
 # dither-hero
 
-![A murmuration rendered as a field of white dots on black](samples/hero.png)
+![A robed wizard with a staff, rendered as a field of white dots on black](samples/hero.png)
 
 Turn a generated grayscale image into a **live black-and-white dot field** — a
 hero that renders every frame through an ordered dither, with particles moving
@@ -131,11 +131,12 @@ cards, README images and print:
 python3 scripts/render_still.py murmuration.png out.png --width 1600
 ```
 
-It skips the particle layer, since a frozen frame of moving particles is
-misleading; use it on presets with `"particles": "off"`. Measured against the
-live engine it lands within ~12% of its ink coverage, the residual being PIL's
-non-antialiased rasteriser against the browser's antialiased arcs at sub-pixel
-radii. Not visible, but not pixel-identical either.
+Particles are included, reproducing the engine's seeded PRNG and spawn order,
+so the still is its first painted frame rather than an approximation. Pass
+`--no-particles` to omit them. Measured against the live engine it lands within
+~12% of its ink coverage, the residual being PIL's non-antialiased rasteriser
+against the browser's antialiased arcs at sub-pixel radii. Not visible, but not
+pixel-identical either.
 
 ## Licence
 

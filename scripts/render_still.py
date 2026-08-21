@@ -6,8 +6,9 @@ build step. This ports its quantisation — same Bayer matrix, same pinned
 non-void auto-level, same radius-by-level mapping — so a still and the live
 hero are the same picture.
 
-Particles are NOT drawn: they are an animated layer, and a frozen frame of
-them is misleading. Use this on presets with "particles": "off".
+Particles ARE drawn, using the engine's own seeded PRNG at t=0 — so the still
+is the engine's first painted frame, not an approximation of it. Pass
+--no-particles to omit them.
 
 Fidelity: measured against the live engine on the murmuration preset, this
 lands within ~12% of its ink coverage. The residual is PIL's non-antialiased
@@ -42,6 +43,74 @@ def bayer(n=8):
 BAYER = bayer(8)
 
 
+def spawn(n):
+    """The engine's seeded PRNG and spawn order, reproduced exactly. A
+    golden-ratio walk would lay particles on a near-regular lattice; this is
+    seeded so runs stay identical between the browser and here."""
+    state = 0x9E3779B9
+
+    def rnd():
+        nonlocal state
+        state = (state + 0x6D2B79F5) & 0xFFFFFFFF
+        t = (state ^ (state >> 15)) * (1 | state) & 0xFFFFFFFF
+        t = (t + ((t ^ (t >> 7)) * (61 | t) & 0xFFFFFFFF)) & 0xFFFFFFFF ^ t
+        return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296
+
+    out = []
+    for _ in range(n):
+        z = rnd() ** 1.6            # computed before the object literal in JS
+        out.append({"z": z, "u": rnd(), "v": rnd(),
+                    "a": rnd() * 2 * math.pi, "r": rnd()})
+        rnd(); rnd(); rnd(); rnd(); rnd()   # vJit, xJit, sway, swayAmp, rnd
+    return out
+
+
+def particle_map(o, cols, rows):
+    """Particle layer as {cell index: value}, max-composited over the subject
+    after tone mapping — exactly where the engine applies it."""
+    mode = o.get("particles", "off")
+    if mode == "off":
+        return {}
+    m = {}
+
+    def put(tx, ty, v):
+        if 0 <= tx < cols and 0 <= ty < rows:
+            k = ty * cols + tx
+            if v > m.get(k, 0):
+                m[k] = v
+
+    z = o["zoom"]
+    u0 = (z - 1) * o["panX"] / z
+    v0 = (z - 1) * o["panY"] / z
+    to_cx = lambda u: (u - u0) * z
+    to_cy = lambda v: (v - v0) * z
+    ps = spawn(o["particleCount"])
+    dim, bright = o["dimmest"], o["brightest"]
+
+    if mode == "radial":
+        ar = rows / cols
+        ox, oy = to_cx(o["emitX"]), to_cy(o["emitY"])
+        for p in ps:
+            d = p["r"] * o["spread"] * z
+            cx = (ox + math.cos(p["a"]) * d * ar) * cols
+            cy = (oy + math.sin(p["a"]) * d) * rows
+            val = bright * (1 - p["r"]) * (0.45 + p["z"] * 0.55)
+            if val > dim * 0.35:
+                put(math.floor(cx), math.floor(cy), val)
+    else:
+        x0 = to_cx(o["emitX"] - o["areaWidth"] / 2)
+        y0 = to_cy(o["emitY"] - o["areaHeight"] / 2)
+        wz, hz = o["areaWidth"] * z, o["areaHeight"] * z
+        for p in ps:
+            sx = math.floor((x0 + p["u"] * wz) * cols)
+            sy = math.floor((y0 + p["v"] * hz) * rows)
+            head = dim + p["z"] * (bright - dim)
+            ln = 1 + round(p["z"] * o["trailLength"])
+            for k in range(ln):
+                put(sx, sy - k, head * (1 - (k / (ln + 0.6)) * 0.75))
+    return m
+
+
 def measure_levels(img):
     """Percentiles over NON-VOID pixels only, from a 256px sample — the art is
     mostly pure black, so whole-frame percentiles crush the subject."""
@@ -56,7 +125,7 @@ def measure_levels(img):
     return lo, hi if hi > lo + 0.02 else lo + 0.02
 
 
-def render(img, o, out_w, out_h, ss=2):
+def render(img, o, out_w, out_h, ss=2, particles=True):
     """ss supersamples then downscales. The browser draws at devicePixelRatio
     with antialiased arcs; at fine grain the dots are SUB-PIXEL (radius well
     under 1px), so a hard-edged 1x rasteriser over-inks them badly. Rendering
@@ -93,6 +162,8 @@ def render(img, o, out_w, out_h, ss=2):
     max_r = (draw_cell * (1 - o["dotGap"]) * o["dotFill"]) / 2
     min_r = max_r * 0.28
 
+    pmap = particle_map(o, cols, rows) if particles else {}
+
     out = Image.new("L", (out_w * ss, out_h * ss), 0)
     d = ImageDraw.Draw(out)
     for y in range(rows):
@@ -102,8 +173,11 @@ def render(img, o, out_w, out_h, ss=2):
             v = max(0.0, min(1.0, v)) ** gamma
             v = k * (v - 0.5) + 0.5 + bright
             if v < o["blackCutoff"]:
-                continue
+                v = 0.0
             v = min(1.0, v)
+            pv = pmap.get(y * cols + x)
+            if pv is not None and pv > v:
+                v = pv          # max-composite, same as the engine
             s = v * (steps - 1)
             base = math.floor(s)
             lvl = min(steps - 1, base + (1 if (s - base) > BAYER[y & 7][x & 7] else 0))
@@ -129,6 +203,7 @@ def main():
     ap.add_argument("--width", type=int, default=1600)
     ap.add_argument("--height", type=int, default=0)
     ap.add_argument("--supersample", type=int, default=4)
+    ap.add_argument("--no-particles", action="store_true")
     a = ap.parse_args()
 
     manifest = json.load(open(os.path.join(ROOT, "samples", "presets.json")))
@@ -136,12 +211,9 @@ def main():
         sys.exit(f"unknown preset {a.preset}; have: {', '.join(manifest['order'])}")
     o = dict(manifest["presets"][a.preset])
     o.pop("label", None)
-    if o.get("particles", "off") != "off":
-        print(f"note: {a.preset} uses particles; the still omits them", file=sys.stderr)
-
     h = a.height or round(a.width * 9 / 16)
     img = Image.open(os.path.join(ROOT, "samples", "img", a.preset))
-    render(img, o, a.width, h, a.supersample).save(a.out, optimize=True)
+    render(img, o, a.width, h, a.supersample, not a.no_particles).save(a.out, optimize=True)
     print(f"{a.out}  {a.width}x{h}  from {a.preset}")
 
 
