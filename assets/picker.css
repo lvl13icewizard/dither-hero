@@ -1,0 +1,130 @@
+/* Tuning panel. Deliberately plain and left-docked: it sits over a hero whose
+   subject is usually composed into the RIGHT of the frame, so docking left
+   keeps the art visible while you tune it. Delete with the panel. */
+
+.pk {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 40;
+  width: 256px;
+  overflow-y: auto;
+  padding: 12px 12px 28px;
+  background: rgba(0, 0, 0, 0.94);
+  border-right: 1px solid #1e2a31;
+  color: #8fb4c9;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.pk-tab {
+  position: fixed;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 40;
+  width: 22px;
+  height: 56px;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid #1e2a31;
+  border-left: 0;
+  color: #8fb4c9;
+  cursor: pointer;
+}
+
+.pk-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.pk-head {
+  color: #fff;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 10px;
+  margin-bottom: 10px;
+}
+.pk-x {
+  background: none;
+  border: 0;
+  color: #8fb4c9;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+}
+
+.pk-h {
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin: 15px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #1e2a31;
+}
+
+.pk-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.pk-mini {
+  font-size: 9.5px;
+  opacity: 0.6;
+  width: 30px;
+}
+.pk-chip {
+  background: #0b1216;
+  color: #8fb4c9;
+  border: 1px solid #22323b;
+  padding: 4px 7px;
+  font: 11px ui-monospace, monospace;
+  cursor: pointer;
+}
+.pk-chip:hover { border-color: #8fb4c9; }
+.pk-chip.is-on {
+  background: #8fb4c9;
+  border-color: #8fb4c9;
+  color: #000;
+}
+
+.pk-grp { margin-bottom: 5px; }
+.pk-lbl {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+}
+.pk-lbl b { color: #fff; font-weight: 500; }
+/* The hint is what makes a slider self-explanatory — keep it, keep it quiet. */
+.pk-lbl i {
+  font-style: normal;
+  opacity: 0.42;
+  font-size: 9px;
+  margin-left: 5px;
+}
+.pk input[type="range"] {
+  width: 100%;
+  height: 14px;
+  margin: 1px 0 0;
+  accent-color: #8fb4c9;
+}
+
+.pk-actions { margin-top: 7px; }
+.pk-out {
+  margin: 7px 0 0;
+  font-size: 9.5px;
+  color: #5f7d8c;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 190px;
+  overflow: auto;
+}
+.pk-hint {
+  margin-top: 9px;
+  font-size: 9.5px;
+  opacity: 0.45;
+}

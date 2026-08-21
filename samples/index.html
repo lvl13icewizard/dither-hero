@@ -1,0 +1,158 @@
+<!doctype html><meta charset="utf-8"><title>dither tuner</title>
+<style>
+  :root{--ink:#fff;--frost:#8fb4c9;--line:#1e2a31}
+  *{box-sizing:border-box}
+  body{background:#000;color:var(--frost);margin:0;overflow:hidden;
+       font:12px ui-monospace,SFMono-Regular,Menlo,monospace}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block;image-rendering:crisp-edges}
+  .plate{position:absolute;left:5vw;top:44%;transform:translateY(-50%);
+         width:min(40vw,30rem);pointer-events:none;transition:left .18s ease}
+  body.open .plate{left:calc(256px + 3vw)}
+  .plate h1{color:var(--ink);font-size:clamp(24px,3.4vw,52px);line-height:.98;margin:0 0 9px;
+            font-weight:500;letter-spacing:-.02em;font-family:ui-sans-serif,system-ui,sans-serif}
+  .plate p{margin:0;letter-spacing:.16em;text-transform:uppercase;font-size:11px;opacity:.75}
+  #caret{position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:3;width:22px;height:56px;
+         background:rgba(0,0,0,.9);border:1px solid var(--line);border-left:0;color:var(--frost);
+         cursor:pointer;font-size:13px;padding:0;transition:left .18s ease}
+  body.open #caret{left:256px}
+  #pk{position:fixed;left:0;top:0;bottom:0;width:256px;z-index:2;overflow-y:auto;
+      background:rgba(0,0,0,.94);border-right:1px solid var(--line);padding:12px 12px 30px;
+      transform:translateX(-100%);transition:transform .18s ease}
+  body.open #pk{transform:none}
+  h2{color:var(--ink);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;
+     margin:15px 0 6px;font-weight:500;border-bottom:1px solid var(--line);padding-bottom:4px}
+  h2:first-child{margin-top:0}
+  .chips{display:flex;flex-wrap:wrap;gap:4px}
+  button{background:#0b1216;color:var(--frost);border:1px solid #22323b;padding:4px 7px;
+         font:11px ui-monospace,monospace;cursor:pointer}
+  button:hover{border-color:var(--frost)}
+  button.on{background:var(--frost);color:#000;border-color:var(--frost)}
+  .grp{margin-bottom:5px}
+  .lbl{display:flex;justify-content:space-between;font-size:10px}
+  .lbl b{color:var(--ink);font-weight:500}
+  .lbl i{font-style:normal;opacity:.42;font-size:9px;margin-left:5px}
+  input[type=range]{width:100%;height:14px;accent-color:#8fb4c9;margin:1px 0 0}
+  .row{display:flex;gap:5px;align-items:center;margin-top:5px}
+  .row>span{font-size:9.5px;width:30px;opacity:.6}
+  pre{white-space:pre-wrap;word-break:break-all;color:#5f7d8c;font-size:9.5px;margin:7px 0 0}
+  .hint{font-size:9.5px;opacity:.45;margin-top:9px;line-height:1.5}
+</style>
+<canvas id="cv"></canvas>
+<div class="plate"><h1>Dithered hero</h1><p>tuning · <span id="who"></span></p></div>
+<button id="caret">▸</button>
+<aside id="pk">
+  <h2>image</h2><div class="chips" id="imgs"></div>
+  <h2>frame</h2><div class="chips" id="fits" style="margin-bottom:6px"></div><div id="g-frame"></div>
+  <h2>dots</h2><div id="g-dots"></div>
+  <h2>tone</h2><div id="g-tone"></div>
+  <h2>particles</h2><div class="chips" id="modes" style="margin-bottom:6px"></div><div id="g-parts"></div>
+  <h2>slots</h2>
+  <div class="row"><span>save</span><span class="chips" id="saveRow"></span></div>
+  <div class="row"><span>load</span><span class="chips" id="loadRow"></span></div>
+  <div class="chips" style="margin-top:7px">
+    <button id="reset">reset</button><button id="dump">copy settings</button>
+  </div>
+  <pre id="outv"></pre>
+  <p class="hint">` toggles panel · slots save per image in this browser</p>
+</aside>
+<script type="module">
+import { DitherHero, DEFAULTS } from "../assets/dither.js";
+
+// presets.json is the single source of truth for the locked settings.
+const MANIFEST = await (await fetch("presets.json", {cache:"no-store"})).json();
+const PRESETS = MANIFEST.presets;
+const ORDER = MANIFEST.order;
+
+const GROUPS = {
+  "g-frame":[["zoom",1,3.5,.01,"in / out"],["panX",0,1,.01,"left ↔ right"],
+             ["panY",0,1,.01,"up ↕ down"]],
+  "g-dots":[["grain",3,24,1,"cell size — bigger = chunkier"],
+            ["toneSteps",2,6,1,"shades of dot"],
+            ["dotGap",.15,.6,.01,"space around each dot"],
+            ["dotFill",.5,1,.02,"dot size in its cell"]],
+  "g-tone":[["contrast",-20,80,1,""],
+            ["shadowLift",0,.8,.02,"0 = linear, more = brighter darks"],
+            ["blackCutoff",0,.15,.005,"below this draws nothing"]],
+  "g-parts":[["particleCount",0,600,10,""],["particleSpeed",0,.8,.01,""],
+             ["emitX",0,1,.01,"source ← → (image coords)"],
+             ["emitY",0,1,.01,"source ↑ ↓ (image coords)"],
+             ["spread",.02,.5,.01,"radial: ring size"],
+             ["areaWidth",.01,1,.01,"fall: box width"],
+             ["areaHeight",.01,1,.01,"fall: box height"],
+             ["trailLength",0,6,.1,"fall: streak behind"],
+             ["dimmest",0,.6,.01,""],["brightest",0,.9,.01,""]],
+};
+const KEYS=["grain","toneSteps","dotGap","dotFill","contrast","brightness","shadowLift",
+  "blackCutoff","zoom","panX","panY","fit","particles","emitX","emitY","spread",
+  "areaWidth","areaHeight","particleCount","particleSpeed","trailLength","dimmest","brightest"];
+
+const cv=document.getElementById("cv");
+const load=s=>new Promise(r=>{const i=new Image();i.onload=()=>r(i);i.src=s;});
+let engine=null, cur=ORDER[0], cache={};
+const mk=(par,txt,on)=>{const b=document.createElement("button");b.textContent=txt;b.onclick=on;par.append(b);return b;};
+
+const imgs=document.getElementById("imgs");
+ORDER.forEach(k=>{const b=mk(imgs,PRESETS[k].label,()=>select(k)); b.dataset.k=k;});
+const modes=document.getElementById("modes");
+["off","fall","radial"].forEach(m=>{const b=mk(modes,m,()=>{engine.setOptions({particles:m});sync();});b.dataset.m=m;});
+const fits=document.getElementById("fits");
+["cover","contain"].forEach(f=>{const b=mk(fits,f,()=>{engine.setOptions({fit:f});sync();});b.dataset.f=f;});
+[1,2,3].forEach(n=>{
+  mk(document.getElementById("saveRow"),String(n),()=>{
+    localStorage.setItem(`dh:${cur}:${n}`,JSON.stringify(snap())); flash(`saved ${n}`);});
+  mk(document.getElementById("loadRow"),String(n),()=>{
+    const r=localStorage.getItem(`dh:${cur}:${n}`);
+    if(!r) return flash(`slot ${n} empty`);
+    engine.setOptions(JSON.parse(r)); sync(); flash(`loaded ${n}`);});
+});
+const snap=()=>Object.fromEntries(KEYS.map(k=>[k,engine.o[k]]));
+const flash=t=>{document.getElementById("outv").textContent=t;};
+
+const inputs={};
+for(const [gid,defs] of Object.entries(GROUPS)){
+  const host=document.getElementById(gid);
+  for(const [key,min,max,step,hint] of defs){
+    const g=document.createElement("div"); g.className="grp";
+    g.innerHTML=`<div class="lbl"><span>${key}${hint?`<i>${hint}</i>`:""}</span><b id="v-${key}"></b></div>`;
+    const r=document.createElement("input"); Object.assign(r,{type:"range",min,max,step});
+    r.oninput=()=>{const v=+r.value;document.getElementById("v-"+key).textContent=v;
+                   engine.setOptions({[key]:v});};
+    g.append(r); host.append(g); inputs[key]=r;
+  }
+}
+function sync(){
+  for(const k in inputs){const v=engine.o[k];inputs[k].value=v;
+    document.getElementById("v-"+k).textContent=Math.round(v*1000)/1000;}
+  [...modes.children].forEach(b=>b.classList.toggle("on",b.dataset.m===engine.o.particles));
+  [...fits.children].forEach(b=>b.classList.toggle("on",b.dataset.f===engine.o.fit));
+  [...imgs.children].forEach(b=>b.classList.toggle("on",b.dataset.k===cur));
+}
+async function select(k){
+  cur=k; document.getElementById("who").textContent=PRESETS[k].label;
+  const img=cache[k]||(cache[k]=await load("img/"+k));
+  if(engine) engine.stop();
+  const {label,...preset}=PRESETS[k];
+  engine=new DitherHero(cv,img,preset);
+  engine.resize(); engine.start(); sync(); window.engine=engine;
+}
+document.getElementById("reset").onclick=()=>{
+  const {label,...preset}=PRESETS[cur];
+  engine.setOptions({...DEFAULTS,...preset}); sync(); flash("reset to preset");};
+document.getElementById("dump").onclick=()=>{
+  const t=JSON.stringify(snap(),null,2);
+  document.getElementById("outv").textContent=cur+"\n"+t;
+  navigator.clipboard?.writeText(t).catch(()=>{});};
+const toggle=()=>{const o=document.body.classList.toggle("open");
+  document.getElementById("caret").textContent=o?"◂":"▸";
+  requestAnimationFrame(()=>engine&&engine.resize());return o;};
+document.getElementById("caret").onclick=toggle;
+window.togglePanel=toggle;
+addEventListener("keydown",e=>{if(e.key==="`"){e.preventDefault();toggle();}});
+addEventListener("resize",()=>engine&&engine.resize());
+addEventListener("pointermove",e=>engine&&engine.setPointer(e.clientX,e.clientY));
+addEventListener("pointerleave",()=>engine&&engine.setPointer(null));
+await select(cur);
+document.body.classList.add("open");
+document.getElementById("caret").textContent="◂";
+window.__ready=true;
+</script>
